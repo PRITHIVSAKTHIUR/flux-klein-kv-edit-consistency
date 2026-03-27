@@ -40,12 +40,19 @@ ADAPTER = {
     "weights": "Klein-consistency.safetensors",
 }
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.bfloat16
+
+if torch.cuda.is_available():
+    print("current device:", torch.cuda.current_device())
+    print("device name:", torch.cuda.get_device_name(torch.cuda.current_device()))
+    DEVICE_LABEL = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+else:
+    DEVICE_LABEL = str(DEVICE).lower()
 
 print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
 print("torch.__version__ =", torch.__version__)
-print("Using device:", device)
+print("Using device:", DEVICE)
 
 
 def apply_patch():
@@ -76,7 +83,7 @@ pipe = Flux2KleinKVPipeline.from_pretrained(
     "black-forest-labs/FLUX.2-klein-9b-kv",
     torch_dtype=dtype,
     token=HF_TOKEN,
-).to(device)
+).to(DEVICE)
 print("Base KV Model loaded successfully.")
 
 print(f"Loading adapter: {ADAPTER['title']}")
@@ -216,7 +223,7 @@ def infer(
         height = max(256, min(MAX_IMAGE_SIZE, (int(height) // 8) * 8))
 
     try:
-        generator = torch.Generator(device=device).manual_seed(seed)
+        generator = torch.Generator(device=DEVICE).manual_seed(seed)
 
         pipe_kwargs = {
             "prompt": prompt,
@@ -265,11 +272,6 @@ def get_example_items():
 @app.api(name="hello")
 def hello(name: str) -> str:
     return f"Hello, {name}!"
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
 
 
 @app.get("/example-file/{filename}")
@@ -331,7 +333,7 @@ async def edit_image(
                 "image_url": f"/download/{output_filename}",
                 "download_url": f"/download/{output_filename}",
                 "image_base64": image_to_base64(result_image),
-                "adapter": ADAPTER["title"],
+                "device": DEVICE_LABEL,
             }
         )
 
@@ -362,563 +364,663 @@ async def homepage(request: Request):
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KV-Edit-Consistency</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
 
     :root {{
-      --bg-main: #ffd6e7;
-      --bg-card: #ff66a3;
-      --bg-header: #ffffff;
-      --bg-result: #ffffff;
-      --bg-dropdown-active: #ff66a3;
-      --bg-advanced: rgba(255, 255, 255, 0.3);
-      --bg-uploader: rgba(255, 255, 255, 0.4);
-      --bg-button-primary: #4ade80;
-      --bg-button-primary-hover: #1ac2ff;
-      --bg-button-secondary: #fde047;
-      --bg-button-secondary-hover: #f97316;
-
-      --color-border: #000000;
-      --color-text: #000000;
-      --color-text-button: #000000;
-    }}
-
-    [data-theme="dark"] {{
-      --bg-main: #2c132c;
-      --bg-card: #592659;
-      --bg-header: #1a1a1a;
-      --bg-result: #2a2a2a;
-      --bg-dropdown-active: #7f397f;
-      --bg-advanced: rgba(0, 0, 0, 0.3);
-      --bg-uploader: rgba(0, 0, 0, 0.4);
-      --color-text: #f0f0f0;
-      --color-text-button: #000000;
+      --bg: #0b0b10;
+      --panel: #111218;
+      --panel-2: #151621;
+      --panel-3: #1b1d2a;
+      --border: #242638;
+      --muted: #9ca3af;
+      --text: #f5f7fb;
+      --text-dim: #c5cad3;
+      --purple: #7c3aed;
+      --purple-hover: #6d28d9;
+      --purple-soft: rgba(124,58,237,0.14);
+      --green: #22c55e;
+      --green-soft: rgba(34,197,94,0.14);
+      --red: #ef4444;
+      --red-soft: rgba(239,68,68,0.14);
+      --yellow: #f59e0b;
+      --input-bg: #0f1017;
+      --same-height: 760px;
     }}
 
     * {{
       box-sizing: border-box;
+      border-radius: 0 !important;
+    }}
+
+    html, body {{
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      min-height: 100%;
     }}
 
     body {{
-      font-family: 'Montserrat', sans-serif;
-      margin: 0;
-      padding: 0;
-      color: var(--color-text);
-      background-color: var(--bg-main);
       overflow-x: hidden;
-      transition: background-color 0.3s ease;
     }}
 
-    .app-container {{
+    .app-shell {{
       min-height: 100vh;
+      background:
+        linear-gradient(to bottom, rgba(124,58,237,0.08), transparent 160px),
+        var(--bg);
+    }}
+
+    .topbar {{
+      height: 56px;
+      border-bottom: 1px solid var(--border);
+      background: #0a0b11;
       display: flex;
-      flex-direction: column;
-    }}
-
-    .app-header {{
-      background: var(--bg-header);
-      padding: 2rem 4rem;
-      border-bottom: 3px solid var(--color-border);
-      color: var(--color-text);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      transition: background-color 0.3s ease, color 0.3s ease;
-      gap: 1rem;
-    }}
-
-    .app-header h1 {{
-      font-size: 2.5rem;
-      font-weight: 900;
-      margin: 0 0 0.5rem 0;
-      line-height: 1;
-    }}
-
-    .app-header p {{
-      font-size: 1rem;
-      font-weight: 600;
-      margin: 0;
-    }}
-
-    .app-main {{
-      flex-grow: 1;
-      background: var(--bg-main);
-      padding: 2rem;
-      transition: background-color 0.3s ease;
-    }}
-
-    .main-grid {{
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 4rem 2rem;
-    }}
-
-    @media (min-width: 1024px) {{
-      .main-grid {{
-        grid-template-columns: 1fr 1fr;
-        gap: 2rem 4rem;
-      }}
-    }}
-
-    .card {{
-      font-family: 'Montserrat', sans-serif;
-      translate: -6px -6px;
-      background: var(--bg-card);
-      border: 3px solid var(--color-border);
-      box-shadow: 12px 12px 0 var(--color-border);
-      transition: all 0.2s ease;
-      width: 100%;
-    }}
-
-    .card:hover {{
-      translate: -3px -3px;
-      box-shadow: 9px 9px 0 var(--color-border);
-    }}
-
-    .head {{
-      font-size: 14px;
-      font-weight: 900;
-      width: 100%;
-      background: var(--bg-header);
-      padding: 12px 16px;
-      color: var(--color-text);
-      border-bottom: 3px solid var(--color-border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }}
-
-    .content {{
-      padding: 1.5rem;
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--color-text);
-    }}
-
-    .button {{
-      display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
-      min-height: 52px;
-      padding: 12px 20px;
-      border: 3px solid var(--color-border);
-      box-shadow: 4px 4px 0 var(--color-border);
-      font-weight: 900;
-      transition: all 0.15s ease;
-      cursor: pointer;
+      padding: 0 24px;
+      color: #d7cdfc;
       font-size: 14px;
-      color: var(--color-text-button);
-      font-family: 'Montserrat', sans-serif;
-      text-decoration: none;
-      background: transparent;
-      line-height: 1;
+      font-weight: 600;
+      letter-spacing: 0.02em;
     }}
 
-    .button.primary {{
-      background: var(--bg-button-primary);
+    .container {{
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 28px;
     }}
 
-    .button.primary:hover {{
-      background: var(--bg-button-primary-hover);
+    .hero {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
     }}
 
-    .button.secondary {{
-      background: var(--bg-button-secondary);
-    }}
-
-    .button.secondary:hover {{
-      background: var(--bg-button-secondary-hover);
-    }}
-
-    .theme-toggle {{
-      padding: 8px;
-      background: var(--bg-button-secondary);
-      width: 52px;
-      height: 52px;
-      flex: 0 0 52px;
-    }}
-
-    .theme-toggle:hover {{
-      background: var(--bg-button-secondary-hover);
-    }}
-
-    .button:hover {{
-      translate: 2px 2px;
-      box-shadow: 2px 2px 0 var(--color-border);
-    }}
-
-    .button:active {{
-      translate: 4px 4px;
-      box-shadow: 0 0 0 var(--color-border);
-    }}
-
-    .button:disabled {{
-      background: #d1d5db;
-      color: #6b7280;
-      cursor: not-allowed;
-      translate: 0 0;
-      box-shadow: 4px 4px 0 var(--color-border);
-    }}
-
-    .form-content {{
+    .hero-left {{
       display: flex;
       flex-direction: column;
-      gap: 1.5rem;
+      gap: 14px;
+    }}
+
+    .eyebrow {{
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+    }}
+
+    .title-row {{
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }}
+
+    .title {{
+      font-size: 44px;
+      line-height: 1;
+      font-weight: 800;
+      margin: 0;
+      letter-spacing: -0.03em;
+    }}
+
+    .hero-tags {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+
+    .tag {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }}
+
+    .tag svg {{
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+    }}
+
+    .tag-purple {{
+      color: #d8ccff;
+      background: var(--purple-soft);
+      border-color: rgba(124,58,237,0.35);
+    }}
+
+    .tag-green {{
+      color: #bbf7d0;
+      background: var(--green-soft);
+      border-color: rgba(34,197,94,0.35);
+    }}
+
+    .tag-red {{
+      color: #fecaca;
+      background: var(--red-soft);
+      border-color: rgba(239,68,68,0.35);
+    }}
+
+    .hero-actions {{
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+    }}
+
+    .ghost-btn {{
+      height: 40px;
+      padding: 0 14px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }}
+
+    .ghost-btn:hover {{
+      background: var(--panel-2);
+    }}
+
+    .layout {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      align-items: stretch;
+    }}
+
+    .panel {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      min-height: var(--same-height);
+      height: var(--same-height);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }}
+
+    .panel-header {{
+      height: 62px;
+      min-height: 62px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      background: #101119;
+    }}
+
+    .panel-title {{
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }}
+
+    .panel-header-right {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }}
+
+    .status-pill {{
+      padding: 5px 8px;
+      background: var(--panel-3);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1;
+      transition: all 0.2s ease;
+    }}
+
+    .status-pill.active {{
+      background: rgba(245,158,11,0.12);
+      border-color: rgba(245,158,11,0.35);
+      color: #fbbf24;
+    }}
+
+    .status-pill.idle {{
+      background: var(--panel-3);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }}
+
+    .panel-body {{
+      flex: 1;
+      min-height: 0;
+      padding: 18px;
+      overflow: auto;
+    }}
+
+    .form-stack {{
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      height: 100%;
     }}
 
     .form-group {{
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: 10px;
     }}
 
-    .form-group label {{
-      font-weight: 900;
-    }}
-
-    .form-actions {{
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      align-items: stretch;
-      margin-top: 0.5rem;
-    }}
-
-    .form-actions .button {{
-      width: 100%;
-      min-width: 0;
-    }}
-
-    .input, textarea.input {{
-      width: 100%;
-      padding: 10px;
-      border: 3px solid var(--color-border);
-      background: var(--bg-result);
-      color: var(--color-text);
-      font-weight: 600;
-      font-family: 'Montserrat', sans-serif;
+    .label {{
       font-size: 14px;
-      box-sizing: border-box;
-      border-radius: 0;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      text-transform: none;
+    }}
+
+    .hint {{
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      margin-top: -4px;
+    }}
+
+    textarea,
+    input,
+    button,
+    select {{
+      font-family: 'Outfit', sans-serif;
+    }}
+
+    .input,
+    .textarea {{
+      width: 100%;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
       outline: none;
+      padding: 14px 14px;
+      font-size: 15px;
     }}
 
-    textarea.input {{
+    .input:focus,
+    .textarea:focus {{
+      border-color: #3a3d56;
+      background: #11131b;
+    }}
+
+    .textarea {{
+      min-height: 200px;
       resize: vertical;
-      min-height: 120px;
+      line-height: 1.55;
     }}
 
-    .checkbox-row {{
+    .upload-wrap {{
+      background: var(--input-bg);
+      border: 1px dashed #32354b;
+      min-height: 220px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 14px;
+      cursor: pointer;
+    }}
+
+    .upload-wrap.dragover {{
+      border-color: var(--purple);
+      background: rgba(124,58,237,0.08);
+    }}
+
+    .upload-wrap input[type="file"] {{
+      display: none;
+    }}
+
+    .upload-placeholder {{
+      min-height: 190px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 16px;
+      text-align: center;
+    }}
+
+    .upload-icon {{
+      width: 56px;
+      height: 56px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      font-weight: 700;
+      justify-content: center;
+      color: #d8ccff;
     }}
 
-    .checkbox-row input {{
-      width: 18px;
-      height: 18px;
-      accent-color: var(--bg-button-primary);
+    .preview-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+      gap: 12px;
+    }}
+
+    .thumb {{
+      position: relative;
+      aspect-ratio: 1/1;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #0b0c12;
+    }}
+
+    .thumb img {{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }}
+
+    .thumb-remove {{
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--border);
+      background: rgba(11,11,16,0.88);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      line-height: 1;
+    }}
+
+    .advanced {{
+      border: 1px solid var(--border);
+      background: #0f1017;
     }}
 
     .advanced-toggle {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
       width: 100%;
-      background: var(--bg-header);
-      border: 3px solid var(--color-border);
-      box-shadow: 4px 4px 0 var(--color-border);
-      font-weight: 900;
+      height: 48px;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
       cursor: pointer;
-      padding: 12px 14px;
-      color: var(--color-text);
-      font-family: 'Montserrat', sans-serif;
       font-size: 14px;
-      text-transform: uppercase;
+      font-weight: 600;
     }}
 
     .advanced-toggle:hover {{
-      transform: translate(2px, 2px);
-      box-shadow: 2px 2px 0 var(--color-border);
+      background: #121420;
     }}
 
-    .advanced-toggle .chevron {{
-      transition: transform 0.2s ease;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }}
-
-    .advanced-toggle.open .chevron {{
-      transform: rotate(180deg);
-    }}
-
-    .advanced-panel {{
-      background: var(--bg-advanced);
-      padding: 1rem;
-      border: 3px solid var(--color-border);
+    .advanced-body {{
       display: none;
-      flex-direction: column;
-      gap: 1rem;
-      margin-top: 1rem;
+      padding: 14px;
     }}
 
-    .advanced-panel.open {{
-      display: flex;
+    .advanced-body.open {{
+      display: block;
     }}
 
     .advanced-grid {{
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 1rem;
+      gap: 14px;
     }}
 
-    .uploader {{
-      border: 3px dashed var(--color-border);
-      background: var(--bg-uploader);
-      padding: 1rem;
+    .checkbox-row {{
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-dim);
+      font-size: 14px;
+      font-weight: 500;
+    }}
+
+    .checkbox-row input {{
+      width: 16px;
+      height: 16px;
+      accent-color: var(--purple);
+    }}
+
+    .actions {{
+      margin-top: auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      padding-top: 8px;
+    }}
+
+    .btn {{
+      height: 48px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
       cursor: pointer;
-      min-height: 220px;
-      transition: background-color 0.2s;
-      color: var(--color-text);
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
     }}
 
-    .uploader.dragover {{
-      background: rgba(74, 222, 128, 0.5);
+    .btn:hover {{
+      background: #1a1d29;
     }}
 
-    .uploader input[type="file"] {{
-      display: none;
+    .btn-primary {{
+      background: var(--purple);
+      border-color: var(--purple);
+      color: white;
     }}
 
-    .uploader-placeholder {{
+    .btn-primary:hover {{
+      background: var(--purple-hover);
+      border-color: var(--purple-hover);
+    }}
+
+    .result-shell {{
+      height: 100%;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      min-height: 180px;
-      gap: 0.85rem;
-      font-weight: 900;
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: inherit;
-      text-align: center;
-      padding: 1rem;
+      gap: 16px;
     }}
 
-    .upload-badge {{
-      width: 78px;
-      height: 78px;
-      border: 3px solid var(--color-border);
-      background: var(--bg-button-secondary);
+    .result-stage {{
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      border: 1px solid var(--border);
+      background: #0d0e14;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 6px 6px 0 var(--color-border);
-    }}
-
-    .uploader-placeholder svg {{
-      width: 40px;
-      height: 40px;
-      display: block;
-    }}
-
-    .image-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-      gap: 1rem;
-    }}
-
-    .image-grid .aspect-square {{
-      aspect-ratio: 1/1;
-      position: relative;
-    }}
-
-    .image-grid img {{
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      border: 2px solid var(--color-border);
-      display: block;
-    }}
-
-    .group {{
-      position: relative;
-    }}
-
-    .image-remove-button {{
-      position: absolute;
-      top: 4px;
-      right: 4px;
-      background: rgba(0,0,0,0.7);
-      color: white;
-      border: none;
-      border-radius: 99px;
-      width: 28px;
-      height: 28px;
-      cursor: pointer;
-      opacity: 0;
-      transition: opacity 0.2s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 900;
-    }}
-
-    .image-grid .group:hover .image-remove-button {{
-      opacity: 1;
-    }}
-
-    .result-area {{
-      width: 100%;
-      height: 60vh;
-      min-height: 400px;
-      background: var(--bg-result);
-      border: 3px solid var(--color-border);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 1rem;
-      position: relative;
       overflow: hidden;
     }}
 
-    .result-area img {{
+    .result-stage img {{
       max-width: 100%;
       max-height: 100%;
       object-fit: contain;
       display: none;
+      position: relative;
+      z-index: 1;
     }}
 
-    .result-placeholder {{
-      text-align: center;
+    .result-empty {{
       display: flex;
       flex-direction: column;
-      gap: 1rem;
       align-items: center;
-      color: var(--color-text);
-      font-weight: 700;
-      padding: 1rem;
+      justify-content: center;
+      gap: 14px;
+      color: var(--text-dim);
+      text-align: center;
+      padding: 24px;
+      position: relative;
+      z-index: 1;
+      transition: filter 0.25s ease, opacity 0.25s ease;
     }}
 
-    .result-placeholder h3 {{
-      font-weight: 900;
-      margin: 0;
-    }}
-
-    .result-placeholder p {{
-      margin: 0;
-    }}
-
-    .result-placeholder svg {{
+    .result-empty-box {{
       width: 72px;
       height: 72px;
-    }}
-
-    .result-icon-shell {{
-      width: 88px;
-      height: 88px;
-      border: 3px solid var(--color-border);
-      background: var(--bg-header);
+      border: 1px solid var(--border);
+      background: var(--panel-2);
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 6px 6px 0 var(--color-border);
+      color: #d8ccff;
     }}
 
-    .download-button {{
+    .download-fab {{
       position: absolute;
-      top: 8px;
-      right: 8px;
-      background: rgba(0,0,0,0.7);
+      top: 12px;
+      right: 12px;
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--border);
+      background: rgba(17,18,24,0.92);
       color: white;
-      border-radius: 99px;
-      padding: 8px;
-      cursor: pointer;
-      opacity: 0;
-      transition: opacity 0.2s;
-      border: none;
       display: none;
       align-items: center;
       justify-content: center;
       text-decoration: none;
-      z-index: 2;
+      z-index: 4;
     }}
 
-    .main-image-wrapper.group:hover .download-button {{
-      opacity: 1;
+    .result-stage.has-image:hover .download-fab {{
+      display: flex;
     }}
 
-    .loader-overlay {{
+    .loader {{
       position: absolute;
       inset: 0;
-      background: rgba(0,0,0,0.45);
       display: none;
       align-items: center;
       justify-content: center;
       flex-direction: column;
-      gap: 1rem;
+      gap: 14px;
+      background: rgba(7,8,12,0.34);
+      backdrop-filter: blur(7px);
+      -webkit-backdrop-filter: blur(7px);
       z-index: 3;
+      pointer-events: none;
     }}
 
-    .spinner {{
-      width: 52px;
-      height: 52px;
-      border: 4px solid rgba(255,255,255,0.3);
+    .circle-loader {{
+      width: 58px;
+      height: 58px;
+      border-radius: 50% !important;
+      border: 4px solid rgba(255,255,255,0.14);
       border-top-color: #ffffff;
-      border-radius: 999px;
-      animation: spin 1s linear infinite;
+      border-right-color: #c4b5fd;
+      animation: spin 0.9s linear infinite;
+      box-shadow: 0 0 20px rgba(124,58,237,0.18);
     }}
 
-    .loader-text {{
+    .loader span {{
+      font-size: 14px;
+      font-weight: 600;
       color: #ffffff;
-      font-weight: 900;
-      letter-spacing: 0.03em;
+      letter-spacing: 0.02em;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.35);
     }}
 
-    .meta-row {{
+    .result-stage.processing .result-empty,
+    .result-stage.processing img {{
+      filter: blur(2px);
+    }}
+
+    .result-meta {{
       display: flex;
-      align-items: center;
+      align-items: stretch;
       justify-content: space-between;
-      gap: 1rem;
-      margin-top: 1rem;
+      gap: 12px;
       flex-wrap: wrap;
     }}
 
-    .seed-pill {{
-      display: inline-flex;
+    .meta-card {{
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      padding: 12px 14px;
+      min-width: 180px;
+      flex: 1 1 240px;
+    }}
+
+    .meta-label {{
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: lowercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }}
+
+    .meta-value {{
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      word-break: break-word;
+      line-height: 1.45;
+      text-transform: lowercase;
+    }}
+
+    .examples-panel {{
+      margin-top: 24px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }}
+
+    .examples-header {{
+      height: 58px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
       align-items: center;
-      gap: 0.5rem;
-      padding: 8px 12px;
-      background: var(--bg-header);
-      border: 3px solid var(--color-border);
-      box-shadow: 4px 4px 0 var(--color-border);
-      font-weight: 900;
+      padding: 0 18px;
+      font-size: 20px;
+      font-weight: 700;
+      background: #101119;
+    }}
+
+    .examples-body {{
+      padding: 18px;
     }}
 
     .examples-grid {{
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 1rem;
+      gap: 14px;
     }}
 
     .example-card {{
-      border: 3px solid var(--color-border);
-      background: var(--bg-result);
-      box-shadow: 4px 4px 0 var(--color-border);
+      background: #0f1017;
+      border: 1px solid var(--border);
       cursor: pointer;
-      transition: all 0.15s ease;
       overflow: hidden;
     }}
 
     .example-card:hover {{
-      transform: translate(-2px, -2px);
-      box-shadow: 6px 6px 0 var(--color-border);
+      border-color: #3a3d56;
+      background: #121420;
     }}
 
     .example-card img {{
@@ -926,66 +1028,53 @@ async def homepage(request: Request):
       aspect-ratio: 1/1;
       object-fit: cover;
       display: block;
-      border-bottom: 3px solid var(--color-border);
+      border-bottom: 1px solid var(--border);
     }}
 
-    .example-card .example-body {{
-      padding: 0.75rem;
+    .example-body {{
+      padding: 12px;
     }}
 
-    .example-card .example-body p {{
+    .example-body p {{
       margin: 0;
-      font-size: 12px;
+      color: var(--text-dim);
+      font-size: 13px;
       line-height: 1.5;
-      font-weight: 700;
-      color: var(--color-text);
+      font-weight: 500;
     }}
 
     .toast-wrap {{
       position: fixed;
-      top: 20px;
-      right: 20px;
+      top: 18px;
+      right: 18px;
+      z-index: 9999;
       display: flex;
       flex-direction: column;
       gap: 10px;
-      z-index: 9999;
     }}
 
     .toast {{
       min-width: 260px;
       max-width: 360px;
-      background: var(--bg-header);
-      color: var(--color-text);
+      background: #141623;
+      border: 1px solid var(--border);
+      color: var(--text);
       padding: 12px 14px;
-      border: 3px solid var(--color-border);
-      box-shadow: 6px 6px 0 var(--color-border);
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
       gap: 12px;
-      font-weight: 700;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
     }}
 
     .toast button {{
       border: none;
       background: transparent;
-      color: inherit;
+      color: var(--text);
       font-size: 18px;
       cursor: pointer;
-      line-height: 1;
       padding: 0;
-      font-weight: 900;
-    }}
-
-    .helper-text {{
-      font-size: 13px;
-      font-weight: 700;
-      opacity: 0.9;
-    }}
-
-    .brand-block {{
-      display: flex;
-      flex-direction: column;
+      line-height: 1;
     }}
 
     @keyframes spin {{
@@ -993,199 +1082,252 @@ async def homepage(request: Request):
       to {{ transform: rotate(360deg); }}
     }}
 
-    @media (max-width: 1024px) {{
+    @media (max-width: 1200px) {{
+      :root {{
+        --same-height: 720px;
+      }}
       .examples-grid {{
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }}
-
-      .app-header {{
-        padding: 1.5rem 2rem;
-      }}
     }}
 
-    @media (max-width: 768px) {{
-      .advanced-grid {{
+    @media (max-width: 980px) {{
+      .layout {{
         grid-template-columns: 1fr;
       }}
-
-      .form-actions {{
-        grid-template-columns: 1fr;
+      .panel {{
+        min-height: auto;
+        height: auto;
+      }}
+      .panel-body {{
+        overflow: visible;
+      }}
+      .result-stage {{
+        min-height: 460px;
+      }}
+      .hero {{
+        flex-direction: column;
       }}
     }}
 
     @media (max-width: 640px) {{
-      .app-header {{
-        padding: 1.25rem 1rem;
-        flex-direction: column;
-        align-items: flex-start;
+      .container {{
+        padding: 16px;
       }}
-
-      .app-header h1 {{
-        font-size: 2rem;
+      .title {{
+        font-size: 32px;
       }}
-
-      .app-main {{
-        padding: 1rem;
+      .advanced-grid,
+      .actions {{
+        grid-template-columns: 1fr;
       }}
-
       .examples-grid {{
         grid-template-columns: 1fr;
+      }}
+      .panel-header {{
+        padding: 0 14px;
+      }}
+      .panel-body {{
+        padding: 14px;
+      }}
+      .hero-tags {{
+        gap: 8px;
+      }}
+      .tag {{
+        width: 100%;
+        justify-content: center;
+      }}
+      .textarea {{
+        min-height: 220px;
       }}
     }}
   </style>
 </head>
-<body data-theme="light">
+<body>
   <div class="toast-wrap" id="toastWrap"></div>
 
-  <div class="app-container">
-    <header class="app-header">
-      <div class="brand-block">
-        <h1>KV-Edit-Consistency</h1>
-        <p>Perform image edits with Consistency LoRA using a minimalist headless Gradio app.</p>
-      </div>
+  <div class="app-shell">
+    <div class="topbar">4-Step Fast Inference KV Image Editing Playground</div>
 
-      <button class="button secondary theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle dark mode / light mode">
-        <span id="themeIcon"></span>
-      </button>
-    </header>
-
-    <main class="app-main">
-      <div class="main-grid">
-        <section class="card">
-          <div class="head">
-            <span>Input</span>
+    <div class="container">
+      <section class="hero">
+        <div class="hero-left">
+          <div class="eyebrow">black-forest-labs / flux.2-klein-9b-kv / edit</div>
+          <div class="title-row">
+            <h1 class="title">KV-Edit-Consistency</h1>
           </div>
 
-          <div class="content">
-            <div class="form-content">
+          <div class="hero-tags">
+            <div class="tag tag-purple">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 3v18"></path>
+                <path d="M3 12h18"></path>
+              </svg>
+              <span>Inference</span>
+            </div>
+
+            <div class="tag tag-green">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="5" width="18" height="14"></rect>
+                <path d="M8 13l2.5-2.5L13 13"></path>
+                <path d="M13 13l2-2 3 3"></path>
+              </svg>
+              <span>image-to-image</span>
+            </div>
+
+            <div class="tag tag-red">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"></path>
+              </svg>
+              <span>fast-edit</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-actions">
+          <button class="ghost-btn" type="button" onclick="document.getElementById('examplesSection').scrollIntoView({{behavior:'smooth'}})">Examples</button>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Input</h2>
+            <div class="panel-header-right">
+              <span class="status-pill">Form</span>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="form-stack">
               <div class="form-group">
-                <label>Upload Images</label>
-                <div class="uploader" id="uploadZone">
+                <div class="label">Images</div>
+                <div class="upload-wrap" id="uploadZone">
                   <input id="fileInput" type="file" accept="image/*" multiple />
-                  <button class="uploader-placeholder" id="uploadPlaceholder" type="button">
-                    <div class="upload-badge">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
-                        <path d="M12 4V15"></path>
-                        <path d="M8.5 7.5L12 4L15.5 7.5"></path>
-                        <rect x="5" y="15.5" width="14" height="4.5"></rect>
+                  <button class="upload-placeholder" id="uploadPlaceholder" type="button">
+                    <div class="upload-icon">
+                      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M12 4v10"></path>
+                        <path d="M8.5 7.5 12 4l3.5 3.5"></path>
+                        <path d="M4 16.5h16"></path>
+                        <path d="M6 20h12"></path>
                       </svg>
                     </div>
-                    <span>Upload one or more images.</span>
+                    <div>
+                      <div style="font-weight:700; color:var(--text); margin-bottom:4px;">Upload one or more images</div>
+                      <div style="font-size:13px; color:var(--muted);">Drag and drop or click to browse</div>
+                    </div>
                   </button>
-                  <div class="image-grid" id="previewGrid" style="display:none;"></div>
+                  <div class="preview-grid" id="previewGrid" style="display:none;"></div>
                 </div>
+                <div class="hint">The first uploaded image is used to auto-fit width and height while preserving aspect ratio.</div>
               </div>
 
               <div class="form-group">
-                <label for="prompt">Edit Prompt</label>
-                <textarea id="prompt" class="input" placeholder="e.g., Change the weather to stormy"></textarea>
+                <label class="label" for="prompt">Edit Prompt</label>
+                <textarea id="prompt" class="textarea" placeholder="Describe the edit you want to apply..."></textarea>
               </div>
 
-              <div class="form-group">
+              <div class="advanced">
                 <button class="advanced-toggle" id="advancedToggle" type="button">
-                  <span>Advanced Options</span>
-                  <span class="chevron" id="advancedChevron">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3">
-                      <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                  </span>
+                  <span>Advanced Settings</span>
+                  <span id="advancedIcon" style="font-size:22px; font-weight:700; line-height:1;">+</span>
                 </button>
-
-                <div class="advanced-panel" id="advancedPanel">
+                <div class="advanced-body" id="advancedBody">
                   <div class="advanced-grid">
                     <div class="form-group">
-                      <label for="seed">Seed</label>
+                      <label class="label" for="seed">seed</label>
                       <input id="seed" class="input" type="number" min="0" max="{MAX_SEED}" value="0" />
                     </div>
-
                     <div class="form-group">
-                      <label for="steps">Inference Steps</label>
+                      <label class="label" for="steps">steps</label>
                       <input id="steps" class="input" type="number" min="1" max="20" value="4" />
                     </div>
-
                     <div class="form-group">
-                      <label for="width">Width</label>
+                      <label class="label" for="width">width</label>
                       <input id="width" class="input" type="number" min="256" max="{MAX_IMAGE_SIZE}" step="8" value="1024" />
                     </div>
-
                     <div class="form-group">
-                      <label for="height">Height</label>
+                      <label class="label" for="height">height</label>
                       <input id="height" class="input" type="number" min="256" max="{MAX_IMAGE_SIZE}" step="8" value="1024" />
                     </div>
                   </div>
-
                   <div class="checkbox-row">
                     <input id="randomizeSeed" type="checkbox" checked />
-                    <label for="randomizeSeed" style="margin:0;">Randomize seed</label>
+                    <label for="randomizeSeed">Randomize seed</label>
                   </div>
                 </div>
               </div>
 
-              <div class="form-actions">
-                <button class="button primary" id="runBtn" type="button">Edit Image</button>
-                <button class="button secondary" id="clearBtn" type="button">Clear</button>
+              <div class="actions">
+                <button class="btn btn-primary" id="runBtn" type="button">Edit Image</button>
+                <button class="btn" id="clearBtn" type="button">Clear</button>
               </div>
             </div>
           </div>
-        </section>
+        </div>
 
-        <section class="card">
-          <div class="head">
-            <span>Output</span>
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Result</h2>
+            <div class="panel-header-right">
+              <span class="status-pill idle" id="resultStatus">Idle</span>
+            </div>
           </div>
-
-          <div class="content">
-            <div class="main-image-wrapper group">
-              <div class="result-area" id="outputBox">
-                <div class="result-placeholder" id="outputEmpty">
-                  <div class="result-icon-shell">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
-                      <rect x="4.5" y="5" width="15" height="11"></rect>
-                      <path d="M8 13l2.5-2.5L13 13"></path>
-                      <path d="M13 13l2-2 2 2"></path>
-                      <path d="M12 16V20"></path>
-                      <path d="M8.5 16.5L12 20L15.5 16.5"></path>
+          <div class="panel-body">
+            <div class="result-shell">
+              <div class="result-stage" id="resultStage">
+                <div class="result-empty" id="outputEmpty">
+                  <div class="result-empty-box">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <rect x="4" y="5" width="16" height="11"></rect>
+                      <path d="M8 12l2.5-2.5L13 12"></path>
+                      <path d="M13 12l2-2 2 2"></path>
+                      <path d="M12 16v4"></path>
                     </svg>
                   </div>
-                  <span>Your edited image will appear here.</span>
+                  <div>
+                    <div style="font-size:17px; font-weight:700; color:var(--text); margin-bottom:4px;">No output yet</div>
+                    <div style="font-size:14px; color:var(--muted);">Your edited image will appear here</div>
+                  </div>
                 </div>
 
                 <img id="outputImage" alt="Generated output" />
-
-                <a id="downloadLink" class="download-button" download title="Download image">
-                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="3">
-                    <path d="M12 3v12"></path>
-                    <path d="m7 10 5 5 5-5"></path>
-                    <path d="M4 21h16"></path>
+                <a id="downloadLink" class="download-fab" download title="Download image">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4">
+                    <path d="M12 4v10"></path>
+                    <path d="m7.5 10.5 4.5 4.5 4.5-4.5"></path>
+                    <path d="M5 20h14"></path>
                   </svg>
                 </a>
 
-                <div class="loader-overlay" id="loaderOverlay">
-                  <div class="spinner"></div>
-                  <div class="loader-text">Processing Image</div>
+                <div class="loader" id="loaderOverlay">
+                  <div class="circle-loader"></div>
+                  <span>Processing image</span>
+                </div>
+              </div>
+
+              <div class="result-meta">
+                <div class="meta-card">
+                  <div class="meta-label">seed</div>
+                  <div class="meta-value" id="usedSeed">-</div>
+                </div>
+                <div class="meta-card">
+                  <div class="meta-label">device name</div>
+                  <div class="meta-value" id="deviceValue">{DEVICE_LABEL}</div>
                 </div>
               </div>
             </div>
-
-            <div class="meta-row">
-              <div class="seed-pill">
-                <span>SEED:</span>
-                <strong id="usedSeed">-</strong>
-              </div>
-            </div>
           </div>
-        </section>
-      </div>
-
-      <section class="card" style="margin-top:2rem;">
-        <div class="head">
-          <span>Examples</span>
         </div>
-        <div class="content">
+      </section>
+
+      <section class="examples-panel" id="examplesSection">
+        <div class="examples-header">Examples</div>
+        <div class="examples-body">
           <div class="examples-grid" id="examplesGrid"></div>
         </div>
       </section>
-    </main>
+    </div>
   </div>
 
   <script>
@@ -1193,13 +1335,8 @@ async def homepage(request: Request):
 
     const state = {{
       files: [],
-      theme: localStorage.getItem("kv_theme") || "light",
       advancedOpen: false
     }};
-
-    const body = document.body;
-    const themeToggle = document.getElementById("themeToggle");
-    const themeIcon = document.getElementById("themeIcon");
 
     const uploadZone = document.getElementById("uploadZone");
     const fileInput = document.getElementById("fileInput");
@@ -1214,60 +1351,23 @@ async def homepage(request: Request):
     const randomizeSeedEl = document.getElementById("randomizeSeed");
 
     const advancedToggle = document.getElementById("advancedToggle");
-    const advancedPanel = document.getElementById("advancedPanel");
+    const advancedBody = document.getElementById("advancedBody");
+    const advancedIcon = document.getElementById("advancedIcon");
 
     const runBtn = document.getElementById("runBtn");
     const clearBtn = document.getElementById("clearBtn");
 
+    const resultStage = document.getElementById("resultStage");
+    const resultStatus = document.getElementById("resultStatus");
     const outputImage = document.getElementById("outputImage");
     const outputEmpty = document.getElementById("outputEmpty");
     const loaderOverlay = document.getElementById("loaderOverlay");
     const usedSeed = document.getElementById("usedSeed");
     const downloadLink = document.getElementById("downloadLink");
+    const deviceValue = document.getElementById("deviceValue");
 
     const examplesGrid = document.getElementById("examplesGrid");
     const toastWrap = document.getElementById("toastWrap");
-
-    function moonSvg() {{
-      return `
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="3">
-          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
-        </svg>
-      `;
-    }}
-
-    function sunSvg() {{
-      return `
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="3">
-          <circle cx="12" cy="12" r="4"></circle>
-          <path d="M12 2v2.2M12 19.8V22M4.22 4.22l1.56 1.56M18.22 18.22l1.56 1.56M2 12h2.2M19.8 12H22M4.22 19.78l1.56-1.56M18.22 5.78l1.56-1.56"></path>
-        </svg>
-      `;
-    }}
-
-    function applyTheme() {{
-      body.setAttribute("data-theme", state.theme);
-      themeIcon.innerHTML = state.theme === "dark" ? sunSvg() : moonSvg();
-      localStorage.setItem("kv_theme", state.theme);
-    }}
-
-    function setAdvanced(open) {{
-      state.advancedOpen = open;
-      advancedPanel.classList.toggle("open", open);
-      advancedToggle.classList.toggle("open", open);
-    }}
-
-    themeToggle.addEventListener("click", () => {{
-      state.theme = state.theme === "dark" ? "light" : "dark";
-      applyTheme();
-    }});
-
-    advancedToggle.addEventListener("click", () => {{
-      setAdvanced(!state.advancedOpen);
-    }});
-
-    applyTheme();
-    setAdvanced(false);
 
     function showToast(message) {{
       const toast = document.createElement("div");
@@ -1290,15 +1390,37 @@ async def homepage(request: Request):
       }}, 4200);
     }}
 
+    function setResultStatus(isActive) {{
+      resultStatus.textContent = isActive ? "Active" : "Idle";
+      resultStatus.classList.remove("active", "idle");
+      resultStatus.classList.add(isActive ? "active" : "idle");
+    }}
+
     function setLoading(loading) {{
       loaderOverlay.style.display = loading ? "flex" : "none";
+      resultStage.classList.toggle("processing", loading);
       runBtn.disabled = loading;
       clearBtn.disabled = loading;
+      runBtn.style.opacity = loading ? "0.8" : "1";
+      clearBtn.style.opacity = loading ? "0.8" : "1";
+      runBtn.style.cursor = loading ? "not-allowed" : "pointer";
+      clearBtn.style.cursor = loading ? "not-allowed" : "pointer";
+      setResultStatus(loading);
     }}
+
+    function setAdvanced(open) {{
+      state.advancedOpen = open;
+      advancedBody.classList.toggle("open", open);
+      advancedIcon.textContent = open ? "−" : "+";
+    }}
+
+    advancedToggle.addEventListener("click", () => {{
+      setAdvanced(!state.advancedOpen);
+    }});
 
     function createThumb(file, index) {{
       const wrapper = document.createElement("div");
-      wrapper.className = "aspect-square group";
+      wrapper.className = "thumb";
 
       const img = document.createElement("img");
       img.src = URL.createObjectURL(file);
@@ -1306,10 +1428,9 @@ async def homepage(request: Request):
 
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
-      removeBtn.className = "image-remove-button";
+      removeBtn.className = "thumb-remove";
       removeBtn.innerHTML = "&times;";
       removeBtn.title = "Remove image";
-
       removeBtn.addEventListener("click", (e) => {{
         e.stopPropagation();
         state.files.splice(index, 1);
@@ -1339,7 +1460,7 @@ async def homepage(request: Request):
     }}
 
     function addFiles(fileList) {{
-      const valid = Array.from(fileList).filter(file => file.type.startsWith("image/"));
+      const valid = Array.from(fileList).filter((file) => file.type.startsWith("image/"));
       if (!valid.length) {{
         showToast("Please upload valid image files.");
         return;
@@ -1349,6 +1470,7 @@ async def homepage(request: Request):
     }}
 
     uploadPlaceholder.addEventListener("click", () => fileInput.click());
+
     uploadZone.addEventListener("click", (e) => {{
       if (e.target === uploadZone) fileInput.click();
     }});
@@ -1384,13 +1506,19 @@ async def homepage(request: Request):
       widthEl.value = "1024";
       heightEl.value = "1024";
       randomizeSeedEl.checked = true;
+
       outputImage.style.display = "none";
       outputImage.removeAttribute("src");
       outputEmpty.style.display = "flex";
       usedSeed.textContent = "-";
+      deviceValue.textContent = "{DEVICE_LABEL}";
       downloadLink.style.display = "none";
       downloadLink.removeAttribute("href");
+      resultStage.classList.remove("has-image", "processing");
+
+      setResultStatus(false);
       setAdvanced(false);
+      setLoading(false);
     }}
 
     clearBtn.addEventListener("click", clearAll);
@@ -1439,12 +1567,10 @@ async def homepage(request: Request):
       }});
     }}
 
-    renderExamples();
-    renderPreviews();
-
     async function submitEdit() {{
       try {{
         const prompt = promptEl.value.trim();
+
         if (!prompt) {{
           showToast("Please enter a prompt.");
           return;
@@ -1458,7 +1584,7 @@ async def homepage(request: Request):
         formData.append("height", heightEl.value || "1024");
         formData.append("steps", stepsEl.value || "4");
 
-        state.files.forEach(file => formData.append("images", file));
+        state.files.forEach((file) => formData.append("images", file));
 
         setLoading(true);
 
@@ -1473,15 +1599,16 @@ async def homepage(request: Request):
           throw new Error(data.error || "Processing failed.");
         }}
 
+        outputImage.onload = () => {{
+          resultStage.classList.add("has-image");
+        }};
+
         outputImage.src = data.image_url + "?t=" + Date.now();
         outputImage.style.display = "block";
         outputEmpty.style.display = "none";
-
-        usedSeed.textContent = String(data.seed);
-
+        usedSeed.textContent = String(data.seed).toLowerCase();
+        deviceValue.textContent = (data.device || "{DEVICE_LABEL}").toLowerCase();
         downloadLink.href = data.download_url;
-        downloadLink.style.display = "flex";
-
       }} catch (err) {{
         showToast(err.message || "An unexpected error occurred.");
       }} finally {{
@@ -1490,9 +1617,15 @@ async def homepage(request: Request):
     }}
 
     runBtn.addEventListener("click", submitEdit);
+
+    setAdvanced(false);
+    setResultStatus(false);
+    renderExamples();
+    renderPreviews();
   </script>
 </body>
 </html>
 """
-    
+
+
 app.launch()
