@@ -4,13 +4,8 @@ flux-klein-kv-edit-consistency is an experimental image editing application powe
 
 ---
 
-<img width="1920" height="1080" alt="Screen Shot 2026-03-25 at 13 58 34" src="https://github.com/user-attachments/assets/483775ae-9ee9-4e3f-9d1d-87fd3e0ebc1f" />
-<img width="2880" height="1800" alt="Screen Shot 2026-03-25 at 14 00 46" src="https://github.com/user-attachments/assets/43cc2b24-547e-44df-88dd-c3760d322950" />
-
----
-
-<img width="2880" height="1800" alt="Screen Shot 2026-03-25 at 13 59 58" src="https://github.com/user-attachments/assets/1ca22af7-72f7-4d4e-b79f-e3557d73128a" />
-<img width="2880" height="1800" alt="Screen Shot 2026-03-25 at 14 00 10" src="https://github.com/user-attachments/assets/57df70a8-ed17-4740-8349-d8968bfe4c98" />
+<img width="1280" height="800" alt="Screen Shot 2026-03-27 at 18 04 20" src="https://github.com/user-attachments/assets/a5f128d0-b4f5-4d53-8384-28d6269a2d6d" />
+<img width="1280" height="800" alt="Screen Shot 2026-03-27 at 18 04 29" src="https://github.com/user-attachments/assets/d48dec72-0eb2-417f-9cb1-57fec52a2265" />
 
 ---
 
